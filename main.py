@@ -1,54 +1,42 @@
+
 import os
 import sys
 import shutil
 import subprocess
+from pathlib import Path
 
-port = os.environ.get('SERVER_PORT', os.environ.get('PORT', '8080'))
-web_port = os.environ.get('WEB_PORT', '8081')
-web_host = os.environ.get('WEB_HOST', '127.0.0.1')
+port = os.environ.get("SERVER_PORT", os.environ.get("PORT", "8080"))
+web_port = os.environ.get("WEB_PORT", "8081")
+web_host = os.environ.get("WEB_HOST", "127.0.0.1")
 
-# Find mitmweb in system PATH
+# Use a Railway Volume for persistent certificates, if configured.
+confdir = Path(
+    os.environ.get("MITM_CONFIG_DIR", "/tmp/mitmproxy")
+)
+confdir.mkdir(parents=True, exist_ok=True)
+
 mitmweb_path = shutil.which("mitmweb")
 
-# If not found in PATH, fallback to common environments (e.g. Pterodactyl container)
-if not mitmweb_path:
-    for fallback in [
-        "/home/container/.local/bin/mitmweb",
-        os.path.expanduser("~/.local/bin/mitmweb")
-    ]:
-        if os.path.exists(fallback):
-            mitmweb_path = fallback
-            break
-
-print(f"[*] Starting mitmweb proxy on port {port}...")
-print(f"[*] Web UI available at: http://{web_host if web_host != '0.0.0.0' else '127.0.0.1'}:{web_port}")
-
 cmd = [
-    mitmweb_path if mitmweb_path else "mitmweb",
+    mitmweb_path or sys.executable,
+    *([] if mitmweb_path else ["-m", "mitmproxy.tools.main"]),
     "-s", "script.py",
     "-p", str(port),
     "--web-port", str(web_port),
     "--web-host", str(web_host),
-    "--set", "block_global=false",
-    "--no-web-open-browser"
+    "--set", f"confdir={confdir}",
+    "--no-web-open-browser",
 ]
 
-try:
-    subprocess.run(cmd)
-except FileNotFoundError:
-    try:
-        # Fallback to direct python module execution
-        from mitmproxy.tools.main import mitmweb
-        sys.argv = [
-            "mitmweb",
-            "-s", "script.py",
-            "-p", str(port),
-            "--web-port", str(web_port),
-            "--web-host", str(web_host),
-            "--set", "block_global=false",
-            "--no-web-open-browser"
-        ]
-        mitmweb()
-    except Exception as e:
-        print(f"[-] Error: mitmweb executable still not found. Make sure requirements.txt installed mitmproxy properly. Details: {e}")
+print(f"[*] Certificate/config directory: {confdir}", flush=True)
+print(f"[*] Starting mitmweb on port {port}...", flush=True)
+print(f"[*] Web UI bind address: {web_host}:{web_port}", flush=True)
 
+try:
+    subprocess.run(cmd, check=True)
+except FileNotFoundError as exc:
+    print(f"[-] mitmweb executable not found: {exc}", flush=True)
+    sys.exit(1)
+except subprocess.CalledProcessError as exc:
+    print(f"[-] mitmweb exited with code {exc.returncode}", flush=True)
+    sys.exit(exc.returncode)
